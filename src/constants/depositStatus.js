@@ -1,0 +1,7 @@
+module.exports = {
+  PENDING: 'PENDING',
+  PAID: 'PAID',
+  EXPIRED: 'EXPIRED',
+  FAILED: 'FAILED',
+  CANCELLED: 'CANCELLED'
+};

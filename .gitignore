@@ -1,0 +1,11 @@
+node_modules/
+.env
+.env.*
+!.env.example
+coverage/
+dist/
+tmp/
+*.log
+prisma/data/*.db
+prisma/data/*.db-journal
+!prisma/data/.gitkeep

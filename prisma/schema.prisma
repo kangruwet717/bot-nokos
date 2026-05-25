@@ -1,0 +1,175 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id               String       @id @default(uuid())
+  telegramId       BigInt       @unique @map("telegram_id")
+  username         String?
+  firstName        String?      @map("first_name")
+  lastName         String?      @map("last_name")
+  balance          BigInt       @default(0)
+  isBanned         Boolean      @default(false) @map("is_banned")
+  banReason        String?      @map("ban_reason")
+  tosAcceptedAt    DateTime?    @map("tos_accepted_at")
+  referralCode     String?      @unique @map("referral_code")
+  referredByUserId String?      @map("referred_by_user_id")
+  createdAt        DateTime     @default(now()) @map("created_at")
+  updatedAt        DateTime     @updatedAt @map("updated_at")
+  deposits         Deposit[]
+  orders           Order[]
+  balanceLogs      BalanceLog[]
+
+  @@map("users")
+}
+
+model Deposit {
+  id                String    @id @default(uuid())
+  userId            String    @map("user_id")
+  reference         String    @unique
+  providerPaymentId String?   @map("provider_payment_id")
+  method            String
+  amount            BigInt
+  fee               BigInt    @default(0)
+  totalAmount       BigInt    @map("total_amount")
+  status            String
+  paymentUrl        String?   @map("payment_url")
+  qrImageUrl        String?   @map("qr_image_url")
+  qrString          String?   @map("qr_string")
+  idempotencyKey    String?   @unique @map("idempotency_key")
+  rawResponse       String?   @map("raw_response")
+  expiredAt         DateTime? @map("expired_at")
+  paidAt            DateTime? @map("paid_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  user              User      @relation(fields: [userId], references: [id])
+
+  @@index([userId, status])
+  @@map("deposits")
+}
+
+model Order {
+  id              String    @id @default(uuid())
+  userId          String    @map("user_id")
+  provider        String
+  providerOrderId String    @unique @map("provider_order_id")
+  serviceCode     String    @map("service_code")
+  serviceName     String    @map("service_name")
+  countryCode     String    @map("country_code")
+  countryName     String    @map("country_name")
+  phoneNumber     String?   @map("phone_number")
+  providerCost    BigInt    @map("provider_cost")
+  sellPrice       BigInt    @map("sell_price")
+  profit          BigInt
+  status          String
+  otpCode         String?   @map("otp_code")
+  smsText         String?   @map("sms_text")
+  cancelReason    String?   @map("cancel_reason")
+  startedAt       DateTime  @default(now()) @map("started_at")
+  smsReceivedAt   DateTime? @map("sms_received_at")
+  completedAt     DateTime? @map("completed_at")
+  expiredAt       DateTime? @map("expired_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  user            User      @relation(fields: [userId], references: [id])
+
+  @@index([userId, status])
+  @@map("orders")
+}
+
+model BalanceLog {
+  id              String   @id @default(uuid())
+  userId          String   @map("user_id")
+  type            String
+  amount          BigInt
+  balanceBefore   BigInt   @map("balance_before")
+  balanceAfter    BigInt   @map("balance_after")
+  referenceType   String   @map("reference_type")
+  referenceId     String   @map("reference_id")
+  note            String?
+  adminTelegramId BigInt?  @map("admin_telegram_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  user            User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, referenceType, referenceId])
+  @@map("balance_logs")
+}
+
+model Service {
+  id            String   @id @default(uuid())
+  provider      String
+  serviceCode   String   @map("service_code")
+  serviceName   String   @map("service_name")
+  localName     String   @map("local_name")
+  category      String?
+  isActive      Boolean  @default(true) @map("is_active")
+  isBlacklisted Boolean  @default(false) @map("is_blacklisted")
+  markupType    String   @default("flat") @map("markup_type")
+  markupValue   BigInt   @default(0) @map("markup_value")
+  minProfit     BigInt   @default(0) @map("min_profit")
+  sortOrder     Int      @default(0) @map("sort_order")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@unique([provider, serviceCode])
+  @@map("services")
+}
+
+model Country {
+  id          String   @id @default(uuid())
+  provider    String
+  countryCode String   @map("country_code")
+  countryName String   @map("country_name")
+  localName   String?  @map("local_name")
+  flagEmoji   String?  @map("flag_emoji")
+  isActive    Boolean  @default(true) @map("is_active")
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([provider, countryCode])
+  @@map("countries")
+}
+
+model ProviderLog {
+  id             String   @id @default(uuid())
+  provider       String
+  action         String
+  requestPayload String?  @map("request_payload")
+  responseBody   String?  @map("response_body")
+  statusCode     Int?     @map("status_code")
+  isError        Boolean  @default(false) @map("is_error")
+  errorMessage   String?  @map("error_message")
+  relatedOrderId String?  @map("related_order_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@map("provider_logs")
+}
+
+model WebhookLog {
+  id           String   @id @default(uuid())
+  source       String
+  headers      String?
+  payload      String
+  isValid      Boolean  @map("is_valid")
+  processed    Boolean  @default(false)
+  errorMessage String?  @map("error_message")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@map("webhook_logs")
+}
+
+model Setting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("settings")
+}
