@@ -9,13 +9,10 @@ async function findOrCreateTelegramUser(from) {
     lastName: from.last_name || null
   };
 
-  const existing = await prisma.user.findUnique({ where: { telegramId } });
-  if (existing) {
-    return prisma.user.update({ where: { id: existing.id }, data });
-  }
-
-  return prisma.user.create({
-    data: {
+  return prisma.user.upsert({
+    where: { telegramId },
+    update: data,
+    create: {
       telegramId,
       ...data,
       referralCode: nanoid(8)

@@ -5,7 +5,7 @@ const userService = require('../../services/user.service');
 const { isAdmin } = require('../middlewares/requireAdmin');
 const { adminKeyboard, adminBackKeyboard } = require('../keyboards/admin.keyboard');
 const { formatRupiah } = require('../../utils/money');
-const { notifyTelegram } = require('../../services/notification.service');
+const { notifyDepositPaidUser, notifyTelegram } = require('../../services/notification.service');
 const { buildReport } = require('../../services/report.service');
 const { safeEditMessageContent } = require('../../utils/telegram');
 const recovery = require('../../services/adminRecovery.service');
@@ -255,10 +255,7 @@ function registerAdminHandlers(bot) {
     const [, reference, ...noteParts] = parseCommand(ctx);
     if (!reference) return ctx.reply('Format: /deposit_paid reference catatan');
     const result = await recovery.markDepositPaid(reference, ctx.from.id, noteParts.join(' ') || null);
-    await notifyTelegram(
-      result.deposit.user.telegramId,
-      `Deposit kamu sudah diproses admin.\n\nReference: ${result.deposit.reference}\nNominal: ${formatRupiah(result.deposit.amount)}`
-    );
+    if (result.credited) await notifyDepositPaidUser(result.deposit);
     return ctx.reply(
       `Deposit ditandai PAID.\nReference: ${result.deposit.reference}\nCredit saldo: ${result.credited ? 'YA' : 'TIDAK, sudah pernah PAID'}`
     );
@@ -517,10 +514,7 @@ function registerAdminHandlers(bot) {
     const deposit = await prisma.deposit.findUnique({ where: { id: ctx.match[1] }, include: { user: true } });
     if (!deposit) return ctx.answerCbQuery('Deposit tidak ditemukan').catch(() => null);
     const result = await recovery.markDepositPaid(deposit.reference, ctx.from.id, 'Admin panel');
-    await notifyTelegram(
-      result.deposit.user.telegramId,
-      `Deposit kamu sudah diproses admin.\n\nReference: ${result.deposit.reference}\nNominal: ${formatRupiah(result.deposit.amount)}`
-    );
+    if (result.credited) await notifyDepositPaidUser(result.deposit);
     return safeEditMessageContent(
       ctx,
       `Deposit ditandai PAID\n\nReference: ${result.deposit.reference}\nCredit saldo: ${result.credited ? 'YA' : 'TIDAK'}`,

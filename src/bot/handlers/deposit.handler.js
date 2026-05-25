@@ -6,6 +6,7 @@ const { depositKeyboard, depositDetailKeyboard } = require('../keyboards/deposit
 const { backMainKeyboard } = require('../keyboards/main.keyboard');
 const messages = require('../../constants/messages');
 const { safeEditMessageContent } = require('../../utils/telegram');
+const { notifyDepositPaidUser } = require('../../services/notification.service');
 const { redis } = require('../../config/redis');
 
 const CUSTOM_DEPOSIT_PREFIX = 'deposit:custom:';
@@ -17,13 +18,19 @@ function depositText(deposit) {
 async function sendDepositInvoice(ctx, deposit) {
   const caption = depositText(deposit);
   const keyboard = depositDetailKeyboard(deposit);
+  let message;
   if (deposit.qrImageUrl) {
-    return ctx.replyWithPhoto(deposit.qrImageUrl, { caption, ...keyboard });
+    message = await ctx.replyWithPhoto(deposit.qrImageUrl, { caption, ...keyboard });
+  } else if (deposit.qrString) {
+    message = await ctx.reply(`${caption}\n\nQRIS string:\n${deposit.qrString}`, keyboard);
+  } else {
+    message = await ctx.reply(caption, keyboard);
   }
-  if (deposit.qrString) {
-    return ctx.reply(`${caption}\n\nQRIS string:\n${deposit.qrString}`, keyboard);
+
+  if (message?.message_id) {
+    await depositService.attachInvoiceMessage(deposit.id, ctx.chat.id, message.message_id).catch(() => null);
   }
-  return ctx.reply(caption, keyboard);
+  return message;
 }
 
 function parseNominal(text) {
@@ -59,6 +66,12 @@ function registerDepositHandlers(bot) {
   bot.action(/^DEP:CHECK:(.+)$/, async (ctx) => {
     try {
       const deposit = await depositService.syncDepositStatus(ctx.match[1], ctx.state.user.id);
+      if (deposit.status === DepositStatus.PAID) {
+        return notifyDepositPaidUser(
+          { ...deposit, user: deposit.user || ctx.state.user },
+          { chatId: ctx.chat.id, messageId: ctx.callbackQuery.message.message_id }
+        );
+      }
       return safeEditMessageContent(
         ctx,
         `Status Deposit\n\nReference: ${deposit.reference}\nNominal: ${formatRupiah(deposit.amount)}\nStatus: ${deposit.status}\nDibayar: ${deposit.paidAt ? formatDateTime(deposit.paidAt) : '-'}`,

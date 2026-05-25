@@ -39,7 +39,17 @@ async function main() {
       await depositService.expirePendingDeposits();
       await depositService.processPendingDeposits();
     } catch (error) {
-      logger.error({ error }, 'deposit maintenance failed');
+      const payload = {
+        message: error.message,
+        code: error.code,
+        status: error.status,
+        action: error.action
+      };
+      if (error.isTransient) {
+        logger.warn(payload, 'deposit maintenance skipped: payment provider temporarily unavailable');
+      } else {
+        logger.error({ error }, 'deposit maintenance failed');
+      }
     }
   }, 60 * 1000);
 

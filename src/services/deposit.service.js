@@ -4,8 +4,7 @@ const env = require('../config/env');
 const DepositStatus = require('../constants/depositStatus');
 const jagopay = require('./jagopay.service');
 const wallet = require('./wallet.service');
-const { notifyTelegram } = require('./notification.service');
-const { formatRupiah } = require('../utils/money');
+const { notifyDepositChannel, notifyDepositPaidUser } = require('./notification.service');
 const { hitLimit } = require('./rateLimit.service');
 const logger = require('../utils/logger');
 const settings = require('./settings.service');
@@ -106,6 +105,25 @@ async function createDepositInvoice(user, amount, method = env.JAGOPAY_DEFAULT_M
   });
 }
 
+async function attachInvoiceMessage(depositId, chatId, messageId) {
+  const deposit = await prisma.deposit.findUnique({ where: { id: depositId } });
+  if (!deposit) return null;
+
+  const currentRaw = parseJsonField(deposit.rawResponse, {});
+  return prisma.deposit.update({
+    where: { id: deposit.id },
+    data: {
+      rawResponse: stringifyJsonField({
+        ...(currentRaw && typeof currentRaw === 'object' ? currentRaw : {}),
+        telegramInvoiceMessage: {
+          chatId: String(chatId),
+          messageId: Number(messageId)
+        }
+      })
+    }
+  });
+}
+
 async function processPaidDeposit(deposit, payment, tx) {
   if (deposit.status === DepositStatus.PAID) return deposit;
   if (payment.amount && BigInt(payment.amount) !== deposit.totalAmount) {
@@ -142,13 +160,15 @@ async function processPaidDeposit(deposit, payment, tx) {
 }
 
 async function markDepositPaid(deposit, mutation) {
-  return prisma.$transaction(async (tx) => {
+  let shouldNotifyChannel = false;
+  const updated = await prisma.$transaction(async (tx) => {
     await lockDeposit(tx, deposit.id);
     const current = await tx.deposit.findUnique({ where: { id: deposit.id } });
     if (!current) throw new Error('Deposit not found');
     if (current.status === DepositStatus.PAID) return current;
     if (current.status !== DepositStatus.PENDING) return current;
 
+    shouldNotifyChannel = true;
     return processPaidDeposit(
       current,
       {
@@ -159,6 +179,19 @@ async function markDepositPaid(deposit, mutation) {
       tx
     );
   });
+
+  if (shouldNotifyChannel && updated.status === DepositStatus.PAID) {
+    const depositWithUser = await prisma.deposit.findUnique({
+      where: { id: updated.id },
+      include: { user: true }
+    });
+    if (depositWithUser) {
+      await notifyDepositChannel(depositWithUser);
+      return depositWithUser;
+    }
+  }
+
+  return updated;
 }
 
 async function findPaidMutationForDeposit(deposit) {
@@ -253,10 +286,11 @@ async function processPendingDeposits(limit = 25) {
       const updated = await markDepositPaid(deposit, mutation);
       if (updated.status === DepositStatus.PAID) {
         paidCount += 1;
-        await notifyTelegram(
-          deposit.user.telegramId,
-          `Deposit berhasil.\n\nNominal masuk: ${formatRupiah(updated.amount)}\nReference: ${updated.reference}`
-        );
+        const depositWithUser = await prisma.deposit.findUnique({
+          where: { id: updated.id },
+          include: { user: true }
+        });
+        if (depositWithUser) await notifyDepositPaidUser(depositWithUser);
       }
     } catch (error) {
       logger.error({ error, depositId: deposit.id, reference: deposit.reference }, 'failed to apply deposit mutation');
@@ -268,6 +302,7 @@ async function processPendingDeposits(limit = 25) {
 
 module.exports = {
   createDepositInvoice,
+  attachInvoiceMessage,
   extractPaymentData,
   syncDepositStatus,
   syncDepositStatusByReference,

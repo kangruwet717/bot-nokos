@@ -18,6 +18,7 @@ const logger = pino({
       '*.authorization',
       '*.headers.authorization',
       'error.config.params.api_key',
+      'error.config.params.apikey',
       'error.config.headers.Authorization',
       'error.config.headers.authorization'
     ],

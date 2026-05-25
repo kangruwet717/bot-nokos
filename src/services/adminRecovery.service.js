@@ -4,6 +4,7 @@ const DepositStatus = require('../constants/depositStatus');
 const OrderStatus = require('../constants/orderStatus');
 const env = require('../config/env');
 const { stringifyJsonField, parseJsonField } = require('../utils/jsonField');
+const { notifyDepositChannel } = require('./notification.service');
 
 async function lockDeposit(tx, depositId) {
   if (env.DATABASE_URL.startsWith('file:')) return;
@@ -19,7 +20,7 @@ async function markDepositPaid(reference, adminTelegramId, note = null) {
   const deposit = await prisma.deposit.findFirst({ where: { reference } });
   if (!deposit) throw new Error('Deposit tidak ditemukan');
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     await lockDeposit(tx, deposit.id);
     const current = await tx.deposit.findUnique({ where: { id: deposit.id }, include: { user: true } });
     if (current.status === DepositStatus.PAID) return { deposit: current, credited: false };
@@ -46,6 +47,19 @@ async function markDepositPaid(reference, adminTelegramId, note = null) {
 
     return { deposit: updated, credited: true };
   });
+
+  if (result.credited) {
+    const depositWithUser = await prisma.deposit.findUnique({
+      where: { id: result.deposit.id },
+      include: { user: true }
+    });
+    if (depositWithUser) {
+      await notifyDepositChannel(depositWithUser);
+      return { ...result, deposit: depositWithUser };
+    }
+  }
+
+  return result;
 }
 
 async function markDepositCancelled(reference, note = null) {

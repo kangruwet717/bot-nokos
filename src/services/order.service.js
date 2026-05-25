@@ -7,7 +7,7 @@ const settings = require('./settings.service');
 const { calculateSellPrice } = require('./pricing.service');
 const { hitLimit } = require('./rateLimit.service');
 const { otpPollingQueue } = require('../config/queue');
-const { notifyTelegram } = require('./notification.service');
+const { notifyOrderChannel, notifyTelegram } = require('./notification.service');
 const { formatRupiah } = require('../utils/money');
 
 function orderExpiresAt() {
@@ -445,6 +445,7 @@ async function checkOrderOtp(orderId) {
       updated.user.telegramId,
       `OTP diterima\n\nNomor: ${updated.phoneNumber}\nKode OTP: ${updated.otpCode}\nPesan: ${updated.smsText || '-'}`
     );
+    await notifyOrderChannel(updated);
     return updated;
   }
 

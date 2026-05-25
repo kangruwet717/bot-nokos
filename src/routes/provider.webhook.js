@@ -1,7 +1,7 @@
 const express = require('express');
 const prisma = require('../config/prisma');
 const OrderStatus = require('../constants/orderStatus');
-const { notifyTelegram } = require('../services/notification.service');
+const { notifyOrderChannel, notifyTelegram } = require('../services/notification.service');
 const env = require('../config/env');
 const { stringifyJsonField } = require('../utils/jsonField');
 
@@ -49,6 +49,7 @@ router.post('/smsbower', async (req, res, next) => {
         updated.user.telegramId,
         `OTP diterima\n\nNomor: ${updated.phoneNumber}\nKode OTP: ${updated.otpCode || '-'}\nPesan: ${updated.smsText || '-'}`
       );
+      await notifyOrderChannel(updated);
     }
 
     res.json({ status: 'SUCCESS' });

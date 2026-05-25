@@ -1,20 +1,60 @@
 const axios = require('axios');
 const env = require('../config/env');
 
+const TRANSIENT_CODES = new Set(['ECONNRESET', 'ECONNABORTED', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN']);
+const TRANSIENT_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
+
 function apiUrl() {
   return `${env.JAGOPAY_BASE_URL.replace(/\/$/, '')}/api.php`;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isTransientAxiosError(error) {
+  const status = error.response?.status;
+  return TRANSIENT_CODES.has(error.code) || TRANSIENT_STATUSES.has(status);
+}
+
+function normalizeRequestError(error, action) {
+  if (!axios.isAxiosError(error)) return error;
+
+  const status = error.response?.status;
+  const code = error.code || null;
+  const detail = status ? `status ${status}` : code || error.message;
+  const wrapped = new Error(`JagoPay ${action} failed: ${detail}`);
+  wrapped.name = 'JagoPayRequestError';
+  wrapped.code = code;
+  wrapped.status = status;
+  wrapped.action = action;
+  wrapped.isTransient = isTransientAxiosError(error);
+  return wrapped;
+}
+
 async function request(action, params = {}, options = {}) {
-  const response = await axios.request({
-    method: options.method || 'GET',
-    url: apiUrl(),
-    params: { apikey: env.JAGOPAY_API_KEY, action, ...params },
-    data: options.data,
-    headers: options.headers,
-    timeout: 15000
-  });
-  return response.data;
+  const attempts = options.attempts || 3;
+  let lastError;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const response = await axios.request({
+        method: options.method || 'GET',
+        url: apiUrl(),
+        params: { apikey: env.JAGOPAY_API_KEY, action, ...params },
+        data: options.data,
+        headers: options.headers,
+        timeout: 15000
+      });
+      return response.data;
+    } catch (error) {
+      lastError = normalizeRequestError(error, action);
+      if (!lastError.isTransient || attempt >= attempts) break;
+      await sleep(500 * attempt);
+    }
+  }
+
+  throw lastError;
 }
 
 function assertSuccess(response, fallbackMessage) {

@@ -23,6 +23,10 @@ npm run worker
 - `GET /health`
 - `POST /webhooks/provider/smsbower`
 
+## Notifikasi Channel Telegram
+
+Isi `TELEGRAM_CHANNEL_ID` dengan username channel seperti `@nama_channel` atau chat ID seperti `-1001234567890`. Bot harus sudah menjadi admin channel supaya bisa mengirim info deposit berhasil dan transaksi nokos selesai.
+
 ## Admin Recovery Commands
 
 - `/deposit_paid reference catatan` menandai deposit pending menjadi paid dan menambah saldo satu kali.
