@@ -39,6 +39,7 @@ const schema = z.object({
   DEFAULT_MARKUP_VALUE: z.coerce.number().int().nonnegative().default(2000),
   DEFAULT_MIN_PROFIT: z.coerce.number().int().nonnegative().default(1000),
   MAX_ACTIVE_ORDERS_PER_USER: z.coerce.number().int().positive().default(2),
+  MAX_BULK_ORDER_QUANTITY: z.coerce.number().int().positive().max(10).default(5),
   MAX_ORDERS_PER_HOUR: z.coerce.number().int().positive().default(10),
   MAX_DEPOSITS_PER_HOUR: z.coerce.number().int().positive().default(6),
   MAX_CALLBACKS_PER_MINUTE: z.coerce.number().int().positive().default(60),

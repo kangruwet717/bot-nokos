@@ -10,10 +10,25 @@ describe('smsbower provider parser', () => {
     });
   });
 
+  it('maps wait retry status with last code as received SMS', async () => {
+    const provider = new SmsBowerProvider();
+    provider.request = async () => 'STATUS_WAIT_RETRY:149671';
+    await expect(provider.checkActivationStatus('1')).resolves.toMatchObject({
+      status: 'SMS_RECEIVED',
+      otpCode: '149671'
+    });
+  });
+
   it('maps cancel response', async () => {
     const provider = new SmsBowerProvider();
     provider.request = async () => 'ACCESS_CANCEL';
     await expect(provider.cancelActivation('1')).resolves.toMatchObject({ ok: true });
+  });
+
+  it('maps request another SMS response', async () => {
+    const provider = new SmsBowerProvider();
+    provider.request = async () => 'ACCESS_RETRY_GET';
+    await expect(provider.requestAnotherSms('1')).resolves.toMatchObject({ ok: true });
   });
 
   it('uses getNumberV2 for activation', async () => {

@@ -351,6 +351,17 @@ async function assertOrderAllowed(user, sellPrice) {
   }
 }
 
+function isProviderOutOfStock(error) {
+  const code = String(error?.providerCode || error?.message || '').toUpperCase();
+  return code === 'NO_NUMBERS' || code.includes('NO_NUMBERS');
+}
+
+function createOutOfStockError() {
+  const error = new Error('Stok baru saja habis. Silakan refresh stok atau pilih provider lain.');
+  error.code = 'OUT_OF_STOCK';
+  return error;
+}
+
 async function createOrder(user, serviceCode, countryCode, selectedProviderId = null) {
   let quote;
   if (selectedProviderId) {
@@ -367,12 +378,18 @@ async function createOrder(user, serviceCode, countryCode, selectedProviderId = 
   await assertOrderAllowed(user, quote.sellPrice);
 
   const providerIdForOrder = selectedProviderId === 'any' ? null : selectedProviderId;
-  const activation = await providerService.callProvider('createActivation', [
-    serviceCode,
-    countryCode,
-    quote.providerCostRaw ?? quote.providerCost,
-    providerIdForOrder ? { providerId: providerIdForOrder } : {}
-  ]);
+  let activation;
+  try {
+    activation = await providerService.callProvider('createActivation', [
+      serviceCode,
+      countryCode,
+      quote.providerCostRaw ?? quote.providerCost,
+      providerIdForOrder ? { providerId: providerIdForOrder } : {}
+    ]);
+  } catch (error) {
+    if (isProviderOutOfStock(error)) throw createOutOfStockError();
+    throw error;
+  }
 
   let order;
   try {
@@ -421,6 +438,27 @@ async function createOrder(user, serviceCode, countryCode, selectedProviderId = 
   );
 
   return order;
+}
+
+async function createOrders(user, serviceCode, countryCode, selectedProviderId = null, quantity = 1) {
+  const count = Math.max(1, Math.min(Number(quantity) || 1, env.MAX_BULK_ORDER_QUANTITY));
+  const orders = [];
+  let error = null;
+
+  for (let index = 0; index < count; index += 1) {
+    try {
+      const freshUser = await prisma.user.findUnique({ where: { id: user.id } });
+      if (!freshUser) throw new Error('User tidak ditemukan');
+      const order = await createOrder(freshUser, serviceCode, countryCode, selectedProviderId);
+      orders.push(order);
+    } catch (caught) {
+      error = caught;
+      break;
+    }
+  }
+
+  if (!orders.length && error) throw error;
+  return { orders, error };
 }
 
 async function checkOrderOtp(orderId) {
@@ -483,6 +521,16 @@ async function cancelOrder(user, orderId) {
     });
     return updated;
   });
+}
+
+async function requestAnotherSms(user, orderId) {
+  const order = await prisma.order.findFirst({ where: { id: orderId, userId: user.id } });
+  if (!order) throw new Error('Order tidak ditemukan');
+  if (order.status !== OrderStatus.WAITING_SMS) throw new Error('Order tidak dapat meminta SMS ulang');
+
+  const result = await providerService.callProvider('requestAnotherSms', [order.providerOrderId], order.provider, order.id);
+  if (!result.ok) throw new Error(result.message || 'Gagal meminta SMS ulang');
+  return order;
 }
 
 async function finishOrder(user, orderId) {
@@ -564,8 +612,10 @@ module.exports = {
   quoteOrder,
   getOrderPriceOptions,
   createOrder,
+  createOrders,
   checkOrderOtp,
   cancelOrder,
+  requestAnotherSms,
   finishOrder,
   expireTimedOutOrders
 };

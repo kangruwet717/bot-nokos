@@ -31,6 +31,10 @@ class BaseProvider {
     throw new Error('Not implemented');
   }
 
+  requestAnotherSms() {
+    throw new Error('Not implemented');
+  }
+
   finishActivation() {
     throw new Error('Not implemented');
   }

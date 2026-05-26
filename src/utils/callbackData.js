@@ -25,4 +25,10 @@ async function consumeCallbackToken(token) {
   return JSON.parse(raw);
 }
 
-module.exports = { buildCallback, parseCallback, createCallbackToken, consumeCallbackToken };
+async function readCallbackToken(token) {
+  const raw = await redis.get(`${PREFIX}${token}`);
+  if (!raw) return null;
+  return JSON.parse(raw);
+}
+
+module.exports = { buildCallback, parseCallback, createCallbackToken, consumeCallbackToken, readCallbackToken };

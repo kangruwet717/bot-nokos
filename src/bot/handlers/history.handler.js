@@ -32,7 +32,7 @@ function registerHistoryHandlers(bot) {
     if (page > 0) nav.push(Markup.button.callback('Prev', `HIST:ORDER:p${page - 1}`));
     if ((page + 1) * PAGE_SIZE < total) nav.push(Markup.button.callback('Next', `HIST:ORDER:p${page + 1}`));
     if (nav.length) rows.push(nav);
-    rows.push([Markup.button.callback('Menu Utama', 'MAIN')]);
+    rows.push([Markup.button.callback('Kembali', 'MAIN')]);
     return safeReplaceMessage(ctx, `Histori Order\n\n${lines.join('\n') || 'Belum ada order.'}`, Markup.inlineKeyboard(rows));
   });
 
@@ -44,7 +44,7 @@ function registerHistoryHandlers(bot) {
       `Detail Order\n\nOrder ID: ${order.id}\nLayanan: ${order.serviceName}\nNegara: ${order.countryName}\nNomor: ${order.phoneNumber || '-'}\nOTP: ${order.otpCode || '-'}\nHarga: ${formatRupiah(order.sellPrice)}\nStatus: ${order.status}\nWaktu order: ${formatDateTime(order.createdAt)}\nWaktu OTP: ${order.smsReceivedAt ? formatDateTime(order.smsReceivedAt) : '-'}\nWaktu selesai: ${order.completedAt ? formatDateTime(order.completedAt) : '-'}`,
       Markup.inlineKeyboard([
         [Markup.button.callback('Histori Order', 'HIST:ORDER:p0')],
-        [Markup.button.callback('Menu Utama', 'MAIN')]
+        [Markup.button.callback('Kembali', 'MAIN')]
       ])
     );
   });
@@ -70,7 +70,7 @@ function registerHistoryHandlers(bot) {
     if (page > 0) nav.push(Markup.button.callback('Prev', `HIST:DEPO:p${page - 1}`));
     if ((page + 1) * PAGE_SIZE < total) nav.push(Markup.button.callback('Next', `HIST:DEPO:p${page + 1}`));
     if (nav.length) rows.push(nav);
-    rows.push([Markup.button.callback('Menu Utama', 'MAIN')]);
+    rows.push([Markup.button.callback('Kembali', 'MAIN')]);
     return safeReplaceMessage(ctx, `Histori Deposit\n\n${lines.join('\n') || 'Belum ada deposit.'}`, Markup.inlineKeyboard(rows));
   });
 }

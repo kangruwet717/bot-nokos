@@ -14,7 +14,7 @@ function depositDetailKeyboard(deposit) {
   return Markup.inlineKeyboard([
     [Markup.button.callback('Cek Status', `DEP:CHECK:${deposit.id}`)],
     [Markup.button.callback('Batalkan Invoice', `DEP:CANCEL:${deposit.id}`)],
-    [Markup.button.callback('Menu Utama', 'MAIN')]
+    [Markup.button.callback('Kembali', 'MAIN')]
   ]);
 }
 

@@ -49,9 +49,15 @@ function gridKeyboard(items, makeButton, options = {}) {
   return Markup.inlineKeyboard(rows);
 }
 
-function confirmOrderKeyboard(token) {
+function confirmOrderKeyboard(token, maxQuantity = 1) {
+  const quantity = Math.max(1, Math.min(Number(maxQuantity) || 1, 5));
+  const quantityButtons = [];
+  for (let count = 1; count <= quantity; count += 1) {
+    quantityButtons.push(Markup.button.callback(`${count}x`, `ORDER:CONFIRM:${token}:${count}`));
+  }
+
   return Markup.inlineKeyboard([
-    [Markup.button.callback('Order Sekarang', `ORDER:CONFIRM:${token}`)],
+    quantityButtons,
     [Markup.button.callback('Refresh Stok', `ORDER:REFRESH:${token}`)],
     [Markup.button.callback('Kembali', 'ORDER:COUNTRY:p0')]
   ]);
@@ -59,16 +65,37 @@ function confirmOrderKeyboard(token) {
 
 function activeOrderKeyboard(orderId) {
   return Markup.inlineKeyboard([
-    [Markup.button.callback('Cek OTP', `ORDER:CHECK:${orderId}`), Markup.button.callback('Batalkan', `ORDER:CANCEL:${orderId}`)],
-    [Markup.button.callback('Selesai', `ORDER:FINISH:${orderId}`), Markup.button.callback('Menu Utama', 'MAIN')]
+    [Markup.button.callback('Cek OTP', `ORDER:CHECK:${orderId}`)],
+    [Markup.button.callback('Minta SMS Ulang', `ORDER:RETRY_SMS:${orderId}`)],
+    [Markup.button.callback('Batalkan', `ORDER:CANCEL:${orderId}`)],
+    [Markup.button.callback('Selesai', `ORDER:FINISH:${orderId}`), Markup.button.callback('Kembali', 'MAIN')]
+  ]);
+}
+
+function activeOrdersKeyboard(token, orders = []) {
+  const cancelRows = orders.slice(0, 5).map((order, index) => [
+    Markup.button.callback(`Batalkan ${index + 1}`, `ORDER:CANCEL:${order.id}`)
+  ]);
+
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('Cek Semua OTP', `ORDER:CHECK_BULK:${token}`)],
+    ...cancelRows,
+    [Markup.button.callback('Order Lagi', 'ORDER:COUNTRY:p0'), Markup.button.callback('Kembali', 'MAIN')]
   ]);
 }
 
 function otpReceivedKeyboard() {
   return Markup.inlineKeyboard([
     [Markup.button.callback('Selesai', 'MAIN'), Markup.button.callback('Order Lagi', 'ORDER:COUNTRY:p0')],
-    [Markup.button.callback('Menu Utama', 'MAIN')]
+    [Markup.button.callback('Kembali', 'MAIN')]
   ]);
 }
 
-module.exports = { paginatedKeyboard, gridKeyboard, confirmOrderKeyboard, activeOrderKeyboard, otpReceivedKeyboard };
+module.exports = {
+  paginatedKeyboard,
+  gridKeyboard,
+  confirmOrderKeyboard,
+  activeOrderKeyboard,
+  activeOrdersKeyboard,
+  otpReceivedKeyboard
+};

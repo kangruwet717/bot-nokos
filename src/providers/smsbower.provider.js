@@ -188,7 +188,11 @@ class SmsBowerProvider extends BaseProvider {
       return { status: 'SMS_RECEIVED', otpCode, smsText: text, raw: data };
     }
     if (text.startsWith('STATUS_WAIT_RETRY:')) {
-      return { status: 'WAITING_SMS', lastCode: text.slice('STATUS_WAIT_RETRY:'.length), raw: data };
+      const otpCode = text
+        .slice('STATUS_WAIT_RETRY:'.length)
+        .trim()
+        .replace(/^['"]|['"]$/g, '');
+      return { status: 'SMS_RECEIVED', otpCode, smsText: text, raw: data };
     }
     if (text === 'STATUS_WAIT_CODE') return { status: 'WAITING_SMS', raw: data };
     if (text === 'STATUS_CANCEL') return { status: 'CANCELLED', raw: data };
@@ -203,6 +207,16 @@ class SmsBowerProvider extends BaseProvider {
       raw: data,
       message: String(data),
       earlyDenied: String(data) === 'EARLY_CANCEL_DENIED'
+    };
+  }
+
+  async requestAnotherSms(activationId) {
+    const data = await this.request('setStatus', { id: activationId, status: 3 });
+    const text = String(data);
+    return {
+      ok: text === 'ACCESS_RETRY_GET' || text === 'ACCESS_ACTIVATION',
+      raw: data,
+      message: text
     };
   }
 

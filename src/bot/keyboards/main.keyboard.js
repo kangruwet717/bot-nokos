@@ -10,7 +10,7 @@ function mainKeyboard() {
 }
 
 function backMainKeyboard() {
-  return Markup.inlineKeyboard([[Markup.button.callback('Menu Utama', 'MAIN')]]);
+  return Markup.inlineKeyboard([[Markup.button.callback('Kembali', 'MAIN')]]);
 }
 
 module.exports = { mainKeyboard, backMainKeyboard };

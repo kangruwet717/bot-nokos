@@ -608,7 +608,7 @@ function registerAdminHandlers(bot) {
     ]);
     return safeEditMessageContent(
       ctx,
-      `Settings utama\n\nOrder: ${orderEnabled && !maintenanceMode ? 'ON' : 'OFF'}\nDeposit: ${depositEnabled ? 'ON' : 'OFF'}\nMaintenance mode: ${maintenanceMode ? 'ON' : 'OFF'}\nPesan tutup:\n${maintenanceMessage}\n\nMIN_DEPOSIT=${process.env.MIN_DEPOSIT}\nMAX_DEPOSIT=${process.env.MAX_DEPOSIT}\nDEFAULT_MARKUP_TYPE=${process.env.DEFAULT_MARKUP_TYPE}\nDEFAULT_MARKUP_VALUE=${process.env.DEFAULT_MARKUP_VALUE}\nMAX_ACTIVE_ORDERS_PER_USER=${process.env.MAX_ACTIVE_ORDERS_PER_USER}\nMAX_ORDERS_PER_HOUR=${process.env.MAX_ORDERS_PER_HOUR}`,
+      `Settings utama\n\nOrder: ${orderEnabled && !maintenanceMode ? 'ON' : 'OFF'}\nDeposit: ${depositEnabled ? 'ON' : 'OFF'}\nMaintenance mode: ${maintenanceMode ? 'ON' : 'OFF'}\nPesan tutup:\n${maintenanceMessage}\n\nMIN_DEPOSIT=${process.env.MIN_DEPOSIT}\nMAX_DEPOSIT=${process.env.MAX_DEPOSIT}\nDEFAULT_MARKUP_TYPE=${process.env.DEFAULT_MARKUP_TYPE}\nDEFAULT_MARKUP_VALUE=${process.env.DEFAULT_MARKUP_VALUE}\nMAX_ACTIVE_ORDERS_PER_USER=${process.env.MAX_ACTIVE_ORDERS_PER_USER}\nMAX_BULK_ORDER_QUANTITY=${process.env.MAX_BULK_ORDER_QUANTITY}\nMAX_ORDERS_PER_HOUR=${process.env.MAX_ORDERS_PER_HOUR}`,
       Markup.inlineKeyboard([
         [Markup.button.callback(maintenanceMode ? 'Matikan Maintenance' : 'Nyalakan Maintenance', 'ADMIN:TOGGLE_MAINTENANCE')],
         [
