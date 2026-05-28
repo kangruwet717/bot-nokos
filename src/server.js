@@ -6,7 +6,28 @@ const { createBot } = require('./bot');
 const { createApp } = require('./app');
 const depositService = require('./services/deposit.service');
 const orderService = require('./services/order.service');
+const { notifyCatalogSyncChannel } = require('./services/notification.service');
 const { createOtpPollingWorker } = require('./workers/otpPolling.worker');
+
+async function getCatalogSnapshot() {
+  const [totalServices, activeServices, totalCountries, activeCountries] = await Promise.all([
+    prisma.service.count({ where: { provider: env.OTP_PROVIDER } }),
+    prisma.service.count({ where: { provider: env.OTP_PROVIDER, isActive: true, isBlacklisted: false } }),
+    prisma.country.count({ where: { provider: env.OTP_PROVIDER } }),
+    prisma.country.count({ where: { provider: env.OTP_PROVIDER, isActive: true } })
+  ]);
+  return { totalServices, activeServices, totalCountries, activeCountries };
+}
+
+function catalogChanged(before, after) {
+  if (!before || !after) return false;
+  return (
+    before.totalServices !== after.totalServices ||
+    before.activeServices !== after.activeServices ||
+    before.totalCountries !== after.totalCountries ||
+    before.activeCountries !== after.activeCountries
+  );
+}
 
 async function main() {
   await prisma.$connect();
@@ -56,8 +77,25 @@ async function main() {
 
   const catalogSyncTimer = setInterval(async () => {
     try {
+      const before = env.CATALOG_SYNC_NOTIFY_CHANNEL ? await getCatalogSnapshot() : null;
       const result = await orderService.syncProviderCatalog();
-      logger.info(result, 'provider catalog synced');
+      const after = env.CATALOG_SYNC_NOTIFY_CHANNEL ? await getCatalogSnapshot() : null;
+      logger.info({ ...result, before, after }, 'provider catalog synced');
+
+      if (
+        env.CATALOG_SYNC_NOTIFY_CHANNEL &&
+        (!env.CATALOG_SYNC_NOTIFY_ONLY_ON_CHANGE || catalogChanged(before, after))
+      ) {
+        await notifyCatalogSyncChannel({
+          provider: env.OTP_PROVIDER,
+          intervalMinutes: env.CATALOG_SYNC_INTERVAL_MINUTES,
+          syncedAt: new Date(),
+          countries: result.countries,
+          services: result.services,
+          before,
+          after
+        });
+      }
     } catch (error) {
       logger.error({ error }, 'provider catalog sync failed');
     }

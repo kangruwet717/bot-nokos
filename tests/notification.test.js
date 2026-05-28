@@ -1,6 +1,7 @@
 const {
   buildDepositChannelMessage,
-  buildOrderChannelMessage
+  buildOrderChannelMessage,
+  buildCatalogSyncChannelMessage
 } = require('../src/services/notification.service');
 
 describe('channel notifications', () => {
@@ -47,5 +48,31 @@ describe('channel notifications', () => {
     expect(message).toContain('123456');
     expect(message).toContain('Rp 2.972');
     expect(message).toContain('Glerxxx');
+  });
+
+  it('builds provider catalog sync channel message', () => {
+    const message = buildCatalogSyncChannelMessage({
+      provider: 'smsbower',
+      intervalMinutes: 60,
+      syncedAt: new Date('2026-05-28T03:00:00.000Z'),
+      before: {
+        totalServices: 1000,
+        activeServices: 990,
+        totalCountries: 200,
+        activeCountries: 198
+      },
+      after: {
+        totalServices: 1010,
+        activeServices: 1001,
+        totalCountries: 203,
+        activeCountries: 201
+      }
+    });
+
+    expect(message).toContain('PROVIDER CATALOG SYNC');
+    expect(message).toContain('smsbower');
+    expect(message).toContain('1001');
+    expect(message).toContain('+10');
+    expect(message).toContain('Harga tetap dicek live');
   });
 });

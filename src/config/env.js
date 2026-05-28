@@ -3,6 +3,10 @@ const { z } = require('zod');
 
 dotenv.config();
 
+const booleanFromString = z
+  .string()
+  .transform((value) => !['false', '0', 'no', 'off'].includes(String(value).toLowerCase()));
+
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3000),
@@ -47,10 +51,10 @@ const schema = z.object({
   OTP_POLL_INTERVAL_SECONDS: z.coerce.number().int().positive().default(10),
   OTP_ORDER_TIMEOUT_MINUTES: z.coerce.number().int().positive().default(20),
   CATALOG_SYNC_INTERVAL_MINUTES: z.coerce.number().int().positive().default(60),
-  START_EMBEDDED_WORKER: z
-    .string()
-    .transform((value) => !['false', '0', 'no'].includes(String(value).toLowerCase()))
-    .default('true'),
+  CATALOG_SYNC_NOTIFY_CHANNEL: booleanFromString.default('false'),
+  CATALOG_SYNC_NOTIFY_ONLY_ON_CHANGE: booleanFromString.default('true'),
+  CATALOG_SYNC_PHOTO_URL: z.union([z.string().url(), z.literal('')]).default(''),
+  START_EMBEDDED_WORKER: booleanFromString.default('true'),
   LOG_LEVEL: z.string().default('info')
 });
 

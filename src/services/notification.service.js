@@ -71,6 +71,22 @@ async function notifyChannel(text, extra = {}) {
   }
 }
 
+async function notifyChannelPhoto(photoUrl, caption, extra = {}) {
+  const channelId = getChannelId();
+  if (!botInstance || !channelId || !photoUrl) return false;
+  try {
+    await botInstance.telegram.sendPhoto(channelId, photoUrl, {
+      caption,
+      parse_mode: 'HTML',
+      ...extra
+    });
+    return true;
+  } catch (error) {
+    logger.warn({ error, channelId, photoUrl }, 'failed to send telegram channel photo');
+    return false;
+  }
+}
+
 function buildOrderChannelMessage(order) {
   const user = order.user || {};
   const lines = [
@@ -112,6 +128,40 @@ function buildDepositChannelMessage(deposit) {
   return lines.join('\n');
 }
 
+function signedDelta(value) {
+  const number = Number(value || 0);
+  if (number > 0) return `+${number}`;
+  return String(number);
+}
+
+function buildCatalogSyncChannelMessage(summary = {}) {
+  const before = summary.before || {};
+  const after = summary.after || {};
+  const serviceDelta = Number(after.totalServices || 0) - Number(before.totalServices || 0);
+  const countryDelta = Number(after.totalCountries || 0) - Number(before.totalCountries || 0);
+  const activeServiceDelta = Number(after.activeServices || 0) - Number(before.activeServices || 0);
+  const activeCountryDelta = Number(after.activeCountries || 0) - Number(before.activeCountries || 0);
+
+  const lines = [
+    '<b>PROVIDER CATALOG SYNC</b>',
+    '',
+    'Catalog provider berhasil diperbarui otomatis.',
+    '',
+    `Provider: <b>${escapeHtml(summary.provider || env.OTP_PROVIDER)}</b>`,
+    `Interval: <b>${escapeHtml(summary.intervalMinutes || '-')} menit</b>`,
+    `Waktu: <b>${escapeHtml(formatDateTime(summary.syncedAt || new Date()))} WIB</b>`,
+    '',
+    `Service aktif: <b>${escapeHtml(after.activeServices ?? '-')}</b> (${escapeHtml(signedDelta(activeServiceDelta))})`,
+    `Total service: <b>${escapeHtml(after.totalServices ?? summary.services ?? '-')}</b> (${escapeHtml(signedDelta(serviceDelta))})`,
+    `Negara aktif: <b>${escapeHtml(after.activeCountries ?? '-')}</b> (${escapeHtml(signedDelta(activeCountryDelta))})`,
+    `Total negara: <b>${escapeHtml(after.totalCountries ?? summary.countries ?? '-')}</b> (${escapeHtml(signedDelta(countryDelta))})`,
+    '',
+    'Harga tetap dicek live dari supplier saat user checkout.'
+  ];
+
+  return lines.join('\n');
+}
+
 async function notifyDepositChannel(deposit) {
   return notifyChannel(buildDepositChannelMessage(deposit), { parse_mode: 'HTML' });
 }
@@ -141,14 +191,26 @@ async function notifyOrderChannel(order) {
   return notifyChannel(buildOrderChannelMessage(order), { parse_mode: 'HTML' });
 }
 
+async function notifyCatalogSyncChannel(summary) {
+  const message = buildCatalogSyncChannelMessage(summary);
+  if (env.CATALOG_SYNC_PHOTO_URL) {
+    const sentPhoto = await notifyChannelPhoto(env.CATALOG_SYNC_PHOTO_URL, message);
+    if (sentPhoto) return true;
+  }
+  return notifyChannel(message, { parse_mode: 'HTML' });
+}
+
 module.exports = {
   setBot,
   notifyTelegram,
   notifyChannel,
+  notifyChannelPhoto,
   deleteTelegramMessage,
   notifyDepositPaidUser,
   notifyDepositChannel,
   notifyOrderChannel,
+  notifyCatalogSyncChannel,
   buildDepositChannelMessage,
-  buildOrderChannelMessage
+  buildOrderChannelMessage,
+  buildCatalogSyncChannelMessage
 };
