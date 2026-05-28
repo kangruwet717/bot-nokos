@@ -10,6 +10,11 @@ const { otpPollingQueue } = require('../config/queue');
 const { notifyOrderChannel, notifyTelegram } = require('./notification.service');
 const { formatRupiah } = require('../utils/money');
 
+const CATALOG_SYNC_BATCH_SIZE = 50;
+let countriesSyncPromise = null;
+let servicesSyncPromise = null;
+let catalogSyncPromise = null;
+
 function orderExpiresAt() {
   return new Date(Date.now() + env.OTP_ORDER_TIMEOUT_MINUTES * 60 * 1000);
 }
@@ -19,46 +24,100 @@ async function lockOrder(tx, orderId) {
   await tx.$queryRaw`SELECT id FROM orders WHERE id = ${orderId} FOR UPDATE`;
 }
 
-async function syncCountries() {
+function chunkArray(items, size) {
+  const chunks = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
+async function runSingleFlight(getPromise, setPromise, task) {
+  const activePromise = getPromise();
+  if (activePromise) return activePromise;
+
+  const promise = task().finally(() => setPromise(null));
+  setPromise(promise);
+  return promise;
+}
+
+async function syncCountriesFromProvider() {
   const countries = await providerService.callProvider('getCountries');
-  for (const country of countries) {
-    await prisma.country.upsert({
-      where: { provider_countryCode: { provider: env.OTP_PROVIDER, countryCode: country.code } },
-      create: {
-        provider: env.OTP_PROVIDER,
-        countryCode: country.code,
-        countryName: country.name,
-        localName: country.name
-      },
-      update: { countryName: country.name }
-    });
+  for (const chunk of chunkArray(countries, CATALOG_SYNC_BATCH_SIZE)) {
+    await prisma.$transaction(
+      chunk.map((country) =>
+        prisma.country.upsert({
+          where: { provider_countryCode: { provider: env.OTP_PROVIDER, countryCode: country.code } },
+          create: {
+            provider: env.OTP_PROVIDER,
+            countryCode: country.code,
+            countryName: country.name,
+            localName: country.name
+          },
+          update: { countryName: country.name }
+        })
+      )
+    );
   }
   return countries;
 }
 
-async function syncServices() {
+async function syncServicesFromProvider() {
   const services = await providerService.callProvider('getServices');
-  for (const service of services) {
-    await prisma.service.upsert({
-      where: { provider_serviceCode: { provider: env.OTP_PROVIDER, serviceCode: service.code } },
-      create: {
-        provider: env.OTP_PROVIDER,
-        serviceCode: service.code,
-        serviceName: service.name,
-        localName: service.name,
-        markupType: env.DEFAULT_MARKUP_TYPE,
-        markupValue: BigInt(env.DEFAULT_MARKUP_VALUE),
-        minProfit: BigInt(env.DEFAULT_MIN_PROFIT)
-      },
-      update: { serviceName: service.name }
-    });
+  for (const chunk of chunkArray(services, CATALOG_SYNC_BATCH_SIZE)) {
+    await prisma.$transaction(
+      chunk.map((service) =>
+        prisma.service.upsert({
+          where: { provider_serviceCode: { provider: env.OTP_PROVIDER, serviceCode: service.code } },
+          create: {
+            provider: env.OTP_PROVIDER,
+            serviceCode: service.code,
+            serviceName: service.name,
+            localName: service.name,
+            markupType: env.DEFAULT_MARKUP_TYPE,
+            markupValue: BigInt(env.DEFAULT_MARKUP_VALUE),
+            minProfit: BigInt(env.DEFAULT_MIN_PROFIT)
+          },
+          update: { serviceName: service.name }
+        })
+      )
+    );
   }
   return services;
 }
 
+async function syncCountries() {
+  return runSingleFlight(
+    () => countriesSyncPromise,
+    (promise) => {
+      countriesSyncPromise = promise;
+    },
+    syncCountriesFromProvider
+  );
+}
+
+async function syncServices() {
+  return runSingleFlight(
+    () => servicesSyncPromise,
+    (promise) => {
+      servicesSyncPromise = promise;
+    },
+    syncServicesFromProvider
+  );
+}
+
 async function syncProviderCatalog() {
-  const [countries, services] = await Promise.all([syncCountries(), syncServices()]);
-  return { countries: countries.length, services: services.length };
+  return runSingleFlight(
+    () => catalogSyncPromise,
+    (promise) => {
+      catalogSyncPromise = promise;
+    },
+    async () => {
+      const countries = await syncCountries();
+      const services = await syncServices();
+      return { countries: countries.length, services: services.length };
+    }
+  );
 }
 
 async function getProviderBalance() {

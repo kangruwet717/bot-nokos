@@ -17,6 +17,8 @@ const { redis } = require('../../config/redis');
 
 const ACTIVE_ORDER_STATUSES = [OrderStatus.PENDING_PROVIDER, OrderStatus.WAITING_SMS];
 const ADMIN_STATE_PREFIX = 'admin:state:';
+const ADMIN_LIST_PAGE_SIZE = 10;
+const USER_HISTORY_PAGE_SIZE = 5;
 
 function adminAction(handler) {
   return async (ctx) => {
@@ -56,6 +58,21 @@ async function buildAdminPanelText() {
 
 function shortId(id) {
   return String(id).slice(0, 8);
+}
+
+function parsePage(value) {
+  const page = Number.parseInt(value, 10);
+  return Number.isFinite(page) && page > 0 ? page : 0;
+}
+
+function paginationRows({ page, hasNext, previousCallback, nextCallback, backCallback = 'ADMIN:HOME' }) {
+  const rows = [];
+  const nav = [];
+  if (page > 0) nav.push(Markup.button.callback('Prev', previousCallback));
+  if (hasNext) nav.push(Markup.button.callback('Next', nextCallback));
+  if (nav.length) rows.push(nav);
+  rows.push([Markup.button.callback('Admin Panel', backCallback)]);
+  return rows;
 }
 
 function adminStateKey(telegramId) {
@@ -376,22 +393,32 @@ function registerAdminHandlers(bot) {
     safeEditMessageContent(ctx, await buildAdminPanelText(), adminKeyboard())
   ));
 
-  bot.action('ADMIN:USERS', adminAction(async (ctx) => {
+  bot.action(/^ADMIN:USERS(?::(\d+))?$/, adminAction(async (ctx) => {
+    const page = parsePage(ctx.match?.[1]);
     const [total, banned, tosAccepted, newest, richest] = await Promise.all([
       prisma.user.count(),
       prisma.user.count({ where: { isBanned: true } }),
       prisma.user.count({ where: { tosAcceptedAt: { not: null } } }),
-      prisma.user.findMany({ orderBy: { createdAt: 'desc' }, take: 5 }),
+      prisma.user.findMany({ orderBy: { createdAt: 'desc' }, skip: page * ADMIN_LIST_PAGE_SIZE, take: ADMIN_LIST_PAGE_SIZE + 1 }),
       prisma.user.findMany({ orderBy: { balance: 'desc' }, take: 3 })
     ]);
-    const lines = newest.map((user, index) => `${index + 1}. ${userDisplayName(user)} (${user.telegramId})`);
+    const users = newest.slice(0, ADMIN_LIST_PAGE_SIZE);
+    const hasNext = newest.length > ADMIN_LIST_PAGE_SIZE;
+    const lines = users.map((user, index) => `${page * ADMIN_LIST_PAGE_SIZE + index + 1}. ${userDisplayName(user)} (${user.telegramId})`);
     const balanceLines = richest.map((user) => `- ${userDisplayName(user)}: ${formatRupiah(user.balance)}`);
-    const rows = newest.map((user) => [Markup.button.callback(`Detail ${shortId(user.id)} - ${userDisplayName(user).slice(0, 18)}`, `ADMIN:USER:DETAIL:${user.id}`)]);
+    const rows = users.map((user) => [Markup.button.callback(`Detail ${shortId(user.id)} - ${userDisplayName(user).slice(0, 18)}`, `ADMIN:USER:DETAIL:${user.id}`)]);
     rows.push([Markup.button.callback('Cari User', 'ADMIN:USER:SEARCH')]);
-    rows.push([Markup.button.callback('Admin Panel', 'ADMIN:HOME')]);
+    rows.push(
+      ...paginationRows({
+        page,
+        hasNext,
+        previousCallback: `ADMIN:USERS:${page - 1}`,
+        nextCallback: `ADMIN:USERS:${page + 1}`
+      })
+    );
     return safeEditMessageContent(
       ctx,
-      `Users\n\nTotal: ${total}\nBanned: ${banned}\nTOS accepted: ${tosAccepted}\n\nUser terbaru:\n${lines.join('\n') || '-'}\n\nSaldo terbesar:\n${balanceLines.join('\n') || '-'}`,
+      `Users\n\nTotal: ${total}\nBanned: ${banned}\nTOS accepted: ${tosAccepted}\nHalaman: ${page + 1}\n\nUser terbaru:\n${lines.join('\n') || '-'}\n\nSaldo terbesar:\n${balanceLines.join('\n') || '-'}`,
       Markup.inlineKeyboard(rows)
     );
   }));
@@ -425,23 +452,30 @@ function registerAdminHandlers(bot) {
     return safeEditMessageContent(ctx, detail.text, userDetailKeyboard(detail.user));
   }));
 
-  bot.action(/^ADMIN:USER:HIST:(.+)$/, adminAction(async (ctx) => {
+  bot.action(/^ADMIN:USER:HIST:([^:]+)(?::(\d+))?$/, adminAction(async (ctx) => {
+    const page = parsePage(ctx.match?.[2]);
     const user = await prisma.user.findUnique({ where: { id: ctx.match[1] } });
     if (!user) return ctx.answerCbQuery('User tidak ditemukan').catch(() => null);
     const [orders, deposits, balanceLogs] = await Promise.all([
-      prisma.order.findMany({ where: { userId: user.id }, orderBy: { createdAt: 'desc' }, take: 5 }),
-      prisma.deposit.findMany({ where: { userId: user.id }, orderBy: { createdAt: 'desc' }, take: 5 }),
-      prisma.balanceLog.findMany({ where: { userId: user.id }, orderBy: { createdAt: 'desc' }, take: 5 })
+      prisma.order.findMany({ where: { userId: user.id }, orderBy: { createdAt: 'desc' }, skip: page * USER_HISTORY_PAGE_SIZE, take: USER_HISTORY_PAGE_SIZE + 1 }),
+      prisma.deposit.findMany({ where: { userId: user.id }, orderBy: { createdAt: 'desc' }, skip: page * USER_HISTORY_PAGE_SIZE, take: USER_HISTORY_PAGE_SIZE + 1 }),
+      prisma.balanceLog.findMany({ where: { userId: user.id }, orderBy: { createdAt: 'desc' }, skip: page * USER_HISTORY_PAGE_SIZE, take: USER_HISTORY_PAGE_SIZE + 1 })
     ]);
-    const orderLines = orders.map((order) => `- ${order.serviceName}/${order.countryName} ${formatRupiah(order.sellPrice)} ${order.status}`);
-    const depositLines = deposits.map((deposit) => `- ${deposit.reference} ${formatRupiah(deposit.amount)} ${deposit.status}`);
-    const balanceLines = balanceLogs.map((log) => `- ${log.type} ${formatRupiah(log.amount)} -> ${formatRupiah(log.balanceAfter)}`);
+    const hasNext = orders.length > USER_HISTORY_PAGE_SIZE || deposits.length > USER_HISTORY_PAGE_SIZE || balanceLogs.length > USER_HISTORY_PAGE_SIZE;
+    const orderLines = orders.slice(0, USER_HISTORY_PAGE_SIZE).map((order) => `- ${order.serviceName}/${order.countryName} ${formatRupiah(order.sellPrice)} ${order.status}`);
+    const depositLines = deposits.slice(0, USER_HISTORY_PAGE_SIZE).map((deposit) => `- ${deposit.reference} ${formatRupiah(deposit.amount)} ${deposit.status}`);
+    const balanceLines = balanceLogs.slice(0, USER_HISTORY_PAGE_SIZE).map((log) => `- ${log.type} ${formatRupiah(log.amount)} -> ${formatRupiah(log.balanceAfter)}`);
     return safeEditMessageContent(
       ctx,
-      `Histori User\n\n${userDisplayName(user)} (${user.telegramId})\n\nOrder terakhir:\n${orderLines.join('\n') || '-'}\n\nDeposit terakhir:\n${depositLines.join('\n') || '-'}\n\nBalance log:\n${balanceLines.join('\n') || '-'}`,
+      `Histori User\n\n${userDisplayName(user)} (${user.telegramId})\nHalaman: ${page + 1}\n\nOrder:\n${orderLines.join('\n') || '-'}\n\nDeposit:\n${depositLines.join('\n') || '-'}\n\nBalance log:\n${balanceLines.join('\n') || '-'}`,
       Markup.inlineKeyboard([
         [Markup.button.callback('User Detail', `ADMIN:USER:DETAIL:${user.id}`)],
-        [Markup.button.callback('Users', 'ADMIN:USERS'), Markup.button.callback('Admin Panel', 'ADMIN:HOME')]
+        ...paginationRows({
+          page,
+          hasNext,
+          previousCallback: `ADMIN:USER:HIST:${user.id}:${page - 1}`,
+          nextCallback: `ADMIN:USER:HIST:${user.id}:${page + 1}`
+        })
       ])
     );
   }));
@@ -466,35 +500,66 @@ function registerAdminHandlers(bot) {
     );
   }));
 
-  bot.action('ADMIN:DEPOSITS', adminAction(async (ctx) => {
-    const deposits = await prisma.deposit.findMany({ orderBy: { createdAt: 'desc' }, take: 10, include: { user: true } });
-    const lines = deposits.map((deposit) => `- ${deposit.reference} ${formatRupiah(deposit.amount)} ${deposit.status} (${deposit.user.telegramId})`);
-    return safeEditMessageContent(ctx, `Deposits terbaru\n\n${lines.join('\n') || '-'}`, adminKeyboard());
+  bot.action(/^ADMIN:DEPOSITS(?::(\d+))?$/, adminAction(async (ctx) => {
+    const page = parsePage(ctx.match?.[1]);
+    const deposits = await prisma.deposit.findMany({
+      orderBy: { createdAt: 'desc' },
+      skip: page * ADMIN_LIST_PAGE_SIZE,
+      take: ADMIN_LIST_PAGE_SIZE + 1,
+      include: { user: true }
+    });
+    const hasNext = deposits.length > ADMIN_LIST_PAGE_SIZE;
+    const lines = deposits
+      .slice(0, ADMIN_LIST_PAGE_SIZE)
+      .map((deposit, index) => `${page * ADMIN_LIST_PAGE_SIZE + index + 1}. ${deposit.reference} ${formatRupiah(deposit.amount)} ${deposit.status} (${deposit.user.telegramId})`);
+    return safeEditMessageContent(
+      ctx,
+      `Deposits\n\nHalaman: ${page + 1}\n\n${lines.join('\n') || '-'}`,
+      Markup.inlineKeyboard(
+        paginationRows({
+          page,
+          hasNext,
+          previousCallback: `ADMIN:DEPOSITS:${page - 1}`,
+          nextCallback: `ADMIN:DEPOSITS:${page + 1}`
+        })
+      )
+    );
   }));
 
-  bot.action('ADMIN:DEPOSITS:PENDING', adminAction(async (ctx) => {
+  bot.action(/^ADMIN:DEPOSITS:PENDING(?::(\d+))?$/, adminAction(async (ctx) => {
+    const page = parsePage(ctx.match?.[1]);
     const deposits = await prisma.deposit.findMany({
       where: { status: 'PENDING' },
       orderBy: { createdAt: 'asc' },
-      take: 10,
+      skip: page * ADMIN_LIST_PAGE_SIZE,
+      take: ADMIN_LIST_PAGE_SIZE + 1,
       include: { user: true }
     });
-    const lines = deposits.map(
+    const visibleDeposits = deposits.slice(0, ADMIN_LIST_PAGE_SIZE);
+    const hasNext = deposits.length > ADMIN_LIST_PAGE_SIZE;
+    const lines = visibleDeposits.map(
       (deposit, index) =>
-        `${index + 1}. ${deposit.reference}\nUser: ${deposit.user.telegramId}\nNominal: ${formatRupiah(deposit.amount)} | Bayar: ${formatRupiah(deposit.totalAmount)}\nID: ${shortId(deposit.id)}`
+        `${page * ADMIN_LIST_PAGE_SIZE + index + 1}. ${deposit.reference}\nUser: ${deposit.user.telegramId}\nNominal: ${formatRupiah(deposit.amount)} | Bayar: ${formatRupiah(deposit.totalAmount)}\nID: ${shortId(deposit.id)}`
     );
-    const rows = deposits.flatMap((deposit) => [
+    const rows = visibleDeposits.flatMap((deposit) => [
       [Markup.button.callback(`Sync ${shortId(deposit.id)}`, `ADMIN:DP:SYNC:${deposit.id}`)],
       [
         Markup.button.callback(`Paid ${shortId(deposit.id)}`, `ADMIN:DP:PAID:${deposit.id}`),
         Markup.button.callback(`Cancel ${shortId(deposit.id)}`, `ADMIN:DP:CANCEL:${deposit.id}`)
       ]
     ]);
-    rows.push([Markup.button.callback('Refresh', 'ADMIN:DEPOSITS:PENDING')]);
-    rows.push([Markup.button.callback('Admin Panel', 'ADMIN:HOME')]);
+    rows.push([Markup.button.callback('Refresh', `ADMIN:DEPOSITS:PENDING:${page}`)]);
+    rows.push(
+      ...paginationRows({
+        page,
+        hasNext,
+        previousCallback: `ADMIN:DEPOSITS:PENDING:${page - 1}`,
+        nextCallback: `ADMIN:DEPOSITS:PENDING:${page + 1}`
+      })
+    );
     return safeEditMessageContent(
       ctx,
-      `Pending Deposit\n\n${lines.join('\n\n') || 'Tidak ada deposit pending.'}`,
+      `Pending Deposit\n\nHalaman: ${page + 1}\n\n${lines.join('\n\n') || 'Tidak ada deposit pending.'}`,
       Markup.inlineKeyboard(rows)
     );
   }));
@@ -533,24 +598,48 @@ function registerAdminHandlers(bot) {
     );
   }));
 
-  bot.action('ADMIN:ORDERS', adminAction(async (ctx) => {
-    const orders = await prisma.order.findMany({ orderBy: { createdAt: 'desc' }, take: 10, include: { user: true } });
-    const lines = orders.map((order) => `- ${order.serviceName}/${order.countryName} ${formatRupiah(order.sellPrice)} ${order.status} (${order.user.telegramId})`);
-    return safeEditMessageContent(ctx, `Orders terbaru\n\n${lines.join('\n') || '-'}`, adminKeyboard());
+  bot.action(/^ADMIN:ORDERS(?::(\d+))?$/, adminAction(async (ctx) => {
+    const page = parsePage(ctx.match?.[1]);
+    const orders = await prisma.order.findMany({
+      orderBy: { createdAt: 'desc' },
+      skip: page * ADMIN_LIST_PAGE_SIZE,
+      take: ADMIN_LIST_PAGE_SIZE + 1,
+      include: { user: true }
+    });
+    const hasNext = orders.length > ADMIN_LIST_PAGE_SIZE;
+    const lines = orders
+      .slice(0, ADMIN_LIST_PAGE_SIZE)
+      .map((order, index) => `${page * ADMIN_LIST_PAGE_SIZE + index + 1}. ${order.serviceName}/${order.countryName} ${formatRupiah(order.sellPrice)} ${order.status} (${order.user.telegramId})`);
+    return safeEditMessageContent(
+      ctx,
+      `Orders\n\nHalaman: ${page + 1}\n\n${lines.join('\n') || '-'}`,
+      Markup.inlineKeyboard(
+        paginationRows({
+          page,
+          hasNext,
+          previousCallback: `ADMIN:ORDERS:${page - 1}`,
+          nextCallback: `ADMIN:ORDERS:${page + 1}`
+        })
+      )
+    );
   }));
 
-  bot.action('ADMIN:ORDERS:ACTIVE', adminAction(async (ctx) => {
+  bot.action(/^ADMIN:ORDERS:ACTIVE(?::(\d+))?$/, adminAction(async (ctx) => {
+    const page = parsePage(ctx.match?.[1]);
     const orders = await prisma.order.findMany({
       where: { status: { in: ACTIVE_ORDER_STATUSES } },
       orderBy: { createdAt: 'asc' },
-      take: 10,
+      skip: page * ADMIN_LIST_PAGE_SIZE,
+      take: ADMIN_LIST_PAGE_SIZE + 1,
       include: { user: true }
     });
-    const lines = orders.map(
+    const visibleOrders = orders.slice(0, ADMIN_LIST_PAGE_SIZE);
+    const hasNext = orders.length > ADMIN_LIST_PAGE_SIZE;
+    const lines = visibleOrders.map(
       (order, index) =>
-        `${index + 1}. ${order.serviceName}/${order.countryName}\nUser: ${order.user.telegramId}\nNomor: ${order.phoneNumber || '-'}\nHarga: ${formatRupiah(order.sellPrice)} | Status: ${order.status}\nID: ${shortId(order.id)}`
+        `${page * ADMIN_LIST_PAGE_SIZE + index + 1}. ${order.serviceName}/${order.countryName}\nUser: ${order.user.telegramId}\nNomor: ${order.phoneNumber || '-'}\nHarga: ${formatRupiah(order.sellPrice)} | Status: ${order.status}\nID: ${shortId(order.id)}`
     );
-    const rows = orders.flatMap((order) => [
+    const rows = visibleOrders.flatMap((order) => [
       [Markup.button.callback(`Cek ${shortId(order.id)}`, `ADMIN:OD:CHECK:${order.id}`)],
       [
         Markup.button.callback(`Refund ${shortId(order.id)}`, `ADMIN:OD:REFUND:${order.id}`),
@@ -558,11 +647,18 @@ function registerAdminHandlers(bot) {
       ],
       [Markup.button.callback(`Complete ${shortId(order.id)}`, `ADMIN:OD:COMPLETE:${order.id}`)]
     ]);
-    rows.push([Markup.button.callback('Refresh', 'ADMIN:ORDERS:ACTIVE')]);
-    rows.push([Markup.button.callback('Admin Panel', 'ADMIN:HOME')]);
+    rows.push([Markup.button.callback('Refresh', `ADMIN:ORDERS:ACTIVE:${page}`)]);
+    rows.push(
+      ...paginationRows({
+        page,
+        hasNext,
+        previousCallback: `ADMIN:ORDERS:ACTIVE:${page - 1}`,
+        nextCallback: `ADMIN:ORDERS:ACTIVE:${page + 1}`
+      })
+    );
     return safeEditMessageContent(
       ctx,
-      `Order Aktif\n\n${lines.join('\n\n') || 'Tidak ada order aktif.'}`,
+      `Order Aktif\n\nHalaman: ${page + 1}\n\n${lines.join('\n\n') || 'Tidak ada order aktif.'}`,
       Markup.inlineKeyboard(rows)
     );
   }));
@@ -722,15 +818,23 @@ function registerAdminHandlers(bot) {
     );
   }));
 
-  bot.action('ADMIN:ERRORS', adminAction(async (ctx) => {
+  bot.action(/^ADMIN:ERRORS(?::(\d+))?$/, adminAction(async (ctx) => {
+    const page = parsePage(ctx.match?.[1]);
     const [providerLogs, webhookLogs] = await Promise.all([
-      prisma.providerLog.findMany({ where: { isError: true }, orderBy: { createdAt: 'desc' }, take: 5 }),
+      prisma.providerLog.findMany({
+        where: { isError: true },
+        orderBy: { createdAt: 'desc' },
+        skip: page * USER_HISTORY_PAGE_SIZE,
+        take: USER_HISTORY_PAGE_SIZE + 1
+      }),
       prisma.webhookLog.findMany({
         where: { OR: [{ isValid: false }, { errorMessage: { not: null } }] },
         orderBy: { createdAt: 'desc' },
-        take: 5
+        skip: page * USER_HISTORY_PAGE_SIZE,
+        take: USER_HISTORY_PAGE_SIZE + 1
       })
     ]);
+    const hasNext = providerLogs.length > USER_HISTORY_PAGE_SIZE || webhookLogs.length > USER_HISTORY_PAGE_SIZE;
     const providerLines = providerLogs.map(
       (log) => `- ${log.createdAt.toISOString()} ${log.provider}.${log.action}: ${log.errorMessage || '-'}`
     );
@@ -739,8 +843,15 @@ function registerAdminHandlers(bot) {
     );
     return safeEditMessageContent(
       ctx,
-      `Errors\n\nProvider:\n${providerLines.join('\n') || '-'}\n\nWebhook:\n${webhookLines.join('\n') || '-'}`,
-      adminBackKeyboard()
+      `Errors\n\nHalaman: ${page + 1}\n\nProvider:\n${providerLines.slice(0, USER_HISTORY_PAGE_SIZE).join('\n') || '-'}\n\nWebhook:\n${webhookLines.slice(0, USER_HISTORY_PAGE_SIZE).join('\n') || '-'}`,
+      Markup.inlineKeyboard(
+        paginationRows({
+          page,
+          hasNext,
+          previousCallback: `ADMIN:ERRORS:${page - 1}`,
+          nextCallback: `ADMIN:ERRORS:${page + 1}`
+        })
+      )
     );
   }));
 
