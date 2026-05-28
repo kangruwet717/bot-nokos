@@ -83,6 +83,15 @@ async function setAdminState(telegramId, state) {
   await redis.set(adminStateKey(telegramId), JSON.stringify(state), 'EX', 300);
 }
 
+async function getAdminState(telegramId) {
+  const raw = await redis.get(adminStateKey(telegramId));
+  return raw ? JSON.parse(raw) : null;
+}
+
+async function clearAdminState(telegramId) {
+  await redis.del(adminStateKey(telegramId));
+}
+
 async function consumeAdminState(telegramId) {
   const key = adminStateKey(telegramId);
   const raw = await redis.get(key);
@@ -122,6 +131,27 @@ function formatReportText(report) {
     month: 'Bulan ini'
   };
   return `${labels[report.period] || report.period}\n\nTotal deposit paid: ${formatRupiah(report.totalDeposit)}\nOrder sukses: ${report.successfulOrders}\nTotal refund: ${formatRupiah(report.refundAmount)}\nRevenue: ${formatRupiah(report.revenue)}\nProvider cost: ${formatRupiah(report.providerCost)}\nGross profit: ${formatRupiah(report.grossProfit)}\nTop service: ${report.topService}\nTop country: ${report.topCountry}`;
+}
+
+function getLargestPhoto(message) {
+  const photos = message?.photo || [];
+  return photos[photos.length - 1] || null;
+}
+
+async function sendBroadcastPhoto(ctx, photoFileId, caption = '') {
+  const users = await prisma.user.findMany({ where: { isBanned: false }, select: { telegramId: true } });
+  let sent = 0;
+  for (const user of users) {
+    try {
+      await ctx.telegram.sendPhoto(Number(user.telegramId), photoFileId, {
+        caption: caption || undefined
+      });
+      sent += 1;
+    } catch (_) {
+      // User may have blocked the bot; continue broadcasting to the rest.
+    }
+  }
+  return { sent, total: users.length };
 }
 
 async function buildUserDetail(userId) {
@@ -212,14 +242,45 @@ function registerAdminHandlers(bot) {
   }));
 
   bot.command('broadcast', adminOnly(async (ctx) => {
+    const repliedPhoto = getLargestPhoto(ctx.message.reply_to_message);
+    if (repliedPhoto) {
+      const commandCaption = ctx.message.text.replace(/^\/broadcast(?:@\w+)?\s*/i, '').trim();
+      const caption = commandCaption || ctx.message.reply_to_message.caption || '';
+      const result = await sendBroadcastPhoto(ctx, repliedPhoto.file_id, caption);
+      return ctx.reply(`Broadcast foto selesai. Sukses: ${result.sent}/${result.total}`);
+    }
+
     const message = ctx.message.text.replace(/^\/broadcast\s*/i, '').trim();
-    if (!message) return ctx.reply('Format: /broadcast pesan');
+    if (!message) {
+      await setAdminState(ctx.from.id, { type: 'broadcast_photo' });
+      return ctx.reply(
+        'Kirim teks setelah /broadcast, atau kirim gambar/banner dengan caption untuk broadcast foto.\n\nContoh teks:\n/broadcast pesan promo\n\nUntuk gambar: kirim gambar setelah pesan ini. State aktif 5 menit.',
+        Markup.inlineKeyboard([[Markup.button.callback('Admin Panel', 'ADMIN:HOME')]])
+      );
+    }
+
     const users = await prisma.user.findMany({ where: { isBanned: false }, select: { telegramId: true } });
     let sent = 0;
     for (const user of users) {
       if (await notifyTelegram(user.telegramId, message)) sent += 1;
     }
     return ctx.reply(`Broadcast selesai. Sukses: ${sent}/${users.length}`);
+  }));
+
+  bot.command('broadcast_photo', adminOnly(async (ctx) => {
+    const repliedPhoto = getLargestPhoto(ctx.message.reply_to_message);
+    if (repliedPhoto) {
+      const commandCaption = ctx.message.text.replace(/^\/broadcast_photo(?:@\w+)?\s*/i, '').trim();
+      const caption = commandCaption || ctx.message.reply_to_message.caption || '';
+      const result = await sendBroadcastPhoto(ctx, repliedPhoto.file_id, caption);
+      return ctx.reply(`Broadcast foto selesai. Sukses: ${result.sent}/${result.total}`);
+    }
+
+    await setAdminState(ctx.from.id, { type: 'broadcast_photo' });
+    return ctx.reply(
+      'Kirim gambar/banner yang ingin dibroadcast ke semua user aktif.\n\nCaption gambar akan ikut dikirim. State ini aktif 5 menit.',
+      Markup.inlineKeyboard([[Markup.button.callback('Admin Panel', 'ADMIN:HOME')]])
+    );
   }));
 
   bot.command('setmarkup', adminOnly(async (ctx) => {
@@ -882,7 +943,11 @@ function registerAdminHandlers(bot) {
   }));
 
   bot.action('ADMIN:BROADCAST', adminAction((ctx) =>
-    safeEditMessageContent(ctx, 'Broadcast\n\nGunakan command:\n/broadcast pesan', adminKeyboard())
+    safeEditMessageContent(
+      ctx,
+      'Broadcast\n\nTeks:\n/broadcast pesan\n\nGambar/banner:\n/broadcast lalu kirim gambar dengan caption.\n\nBisa juga reply gambar dengan /broadcast caption opsional.',
+      adminKeyboard()
+    )
   ));
 
   bot.action(/^ADMIN:REPORT(?::(today|day|week|month))?$/, adminAction(async (ctx) => {
@@ -894,6 +959,19 @@ function registerAdminHandlers(bot) {
       reportKeyboard()
     );
   }));
+
+  bot.on('photo', async (ctx, next) => {
+    if (!isAdmin(ctx.from?.id)) return next();
+    const state = await getAdminState(ctx.from.id);
+    if (state?.type !== 'broadcast_photo') return next();
+
+    await clearAdminState(ctx.from.id);
+    const photo = getLargestPhoto(ctx.message);
+    if (!photo) return ctx.reply('Gambar tidak valid.', adminBackKeyboard());
+
+    const result = await sendBroadcastPhoto(ctx, photo.file_id, ctx.message.caption || '');
+    return ctx.reply(`Broadcast foto selesai. Sukses: ${result.sent}/${result.total}`, adminBackKeyboard());
+  });
 
   bot.on('text', async (ctx, next) => {
     if (!isAdmin(ctx.from?.id)) return next();
@@ -920,6 +998,11 @@ function registerAdminHandlers(bot) {
         `Pesan tutup berhasil diupdate.\n\n${message}`,
         Markup.inlineKeyboard([[Markup.button.callback('Settings', 'ADMIN:SETTINGS')]])
       );
+    }
+
+    if (state.type === 'broadcast_photo') {
+      await setAdminState(ctx.from.id, state);
+      return ctx.reply('Silakan kirim gambar/banner, bukan teks. Caption ditulis di caption gambar.', adminBackKeyboard());
     }
 
     return next();
