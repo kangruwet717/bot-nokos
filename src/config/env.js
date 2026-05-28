@@ -46,6 +46,7 @@ const schema = z.object({
   MAX_PENDING_DEPOSITS_PER_USER: z.coerce.number().int().positive().default(3),
   OTP_POLL_INTERVAL_SECONDS: z.coerce.number().int().positive().default(10),
   OTP_ORDER_TIMEOUT_MINUTES: z.coerce.number().int().positive().default(20),
+  CATALOG_SYNC_INTERVAL_MINUTES: z.coerce.number().int().positive().default(60),
   START_EMBEDDED_WORKER: z
     .string()
     .transform((value) => !['false', '0', 'no'].includes(String(value).toLowerCase()))

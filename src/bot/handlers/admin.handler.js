@@ -96,6 +96,34 @@ function userDisplayName(user) {
   return fullName || user.username || String(user.telegramId);
 }
 
+function normalizeReportPeriod(period) {
+  const normalized = String(period || 'today').toLowerCase();
+  if (['today', 'day', 'daily'].includes(normalized)) return 'today';
+  if (['week', 'weekly'].includes(normalized)) return 'week';
+  if (['month', 'monthly'].includes(normalized)) return 'month';
+  return 'today';
+}
+
+function reportKeyboard() {
+  return Markup.inlineKeyboard([
+    [
+      Markup.button.callback('Hari Ini', 'ADMIN:REPORT:today'),
+      Markup.button.callback('Minggu Ini', 'ADMIN:REPORT:week')
+    ],
+    [Markup.button.callback('Bulan Ini', 'ADMIN:REPORT:month')],
+    [Markup.button.callback('Admin Panel', 'ADMIN:HOME')]
+  ]);
+}
+
+function formatReportText(report) {
+  const labels = {
+    today: 'Hari ini',
+    week: 'Minggu ini',
+    month: 'Bulan ini'
+  };
+  return `${labels[report.period] || report.period}\n\nTotal deposit paid: ${formatRupiah(report.totalDeposit)}\nOrder sukses: ${report.successfulOrders}\nTotal refund: ${formatRupiah(report.refundAmount)}\nRevenue: ${formatRupiah(report.revenue)}\nProvider cost: ${formatRupiah(report.providerCost)}\nGross profit: ${formatRupiah(report.grossProfit)}\nTop service: ${report.topService}\nTop country: ${report.topCountry}`;
+}
+
 async function buildUserDetail(userId) {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) throw new Error('User tidak ditemukan');
@@ -262,10 +290,8 @@ function registerAdminHandlers(bot) {
 
   bot.command('report', adminOnly(async (ctx) => {
     const [, period = 'today'] = parseCommand(ctx);
-    const report = await buildReport(period === 'month' ? 'month' : 'today');
-    return ctx.reply(
-      `Report ${report.period}\n\nTotal deposit paid: ${formatRupiah(report.totalDeposit)}\nOrder sukses: ${report.successfulOrders}\nTotal refund: ${formatRupiah(report.refundAmount)}\nRevenue: ${formatRupiah(report.revenue)}\nProvider cost: ${formatRupiah(report.providerCost)}\nGross profit: ${formatRupiah(report.grossProfit)}\nTop service: ${report.topService}\nTop country: ${report.topCountry}`
-    );
+    const report = await buildReport(normalizeReportPeriod(period));
+    return ctx.reply(formatReportText(report), reportKeyboard());
   }));
 
   bot.command('deposit_paid', adminOnly(async (ctx) => {
@@ -859,12 +885,13 @@ function registerAdminHandlers(bot) {
     safeEditMessageContent(ctx, 'Broadcast\n\nGunakan command:\n/broadcast pesan', adminKeyboard())
   ));
 
-  bot.action('ADMIN:REPORT', adminAction(async (ctx) => {
-    const report = await buildReport('today');
+  bot.action(/^ADMIN:REPORT(?::(today|day|week|month))?$/, adminAction(async (ctx) => {
+    const period = normalizeReportPeriod(ctx.match?.[1]);
+    const report = await buildReport(period);
     return safeEditMessageContent(
       ctx,
-      `Report today\n\nTotal deposit paid: ${formatRupiah(report.totalDeposit)}\nOrder sukses: ${report.successfulOrders}\nTotal refund: ${formatRupiah(report.refundAmount)}\nRevenue: ${formatRupiah(report.revenue)}\nProvider cost: ${formatRupiah(report.providerCost)}\nGross profit: ${formatRupiah(report.grossProfit)}\nTop service: ${report.topService}\nTop country: ${report.topCountry}`,
-      adminKeyboard()
+      formatReportText(report),
+      reportKeyboard()
     );
   }));
 

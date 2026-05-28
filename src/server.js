@@ -5,6 +5,7 @@ const { redis } = require('./config/redis');
 const { createBot } = require('./bot');
 const { createApp } = require('./app');
 const depositService = require('./services/deposit.service');
+const orderService = require('./services/order.service');
 const { createOtpPollingWorker } = require('./workers/otpPolling.worker');
 
 async function main() {
@@ -53,9 +54,19 @@ async function main() {
     }
   }, 60 * 1000);
 
+  const catalogSyncTimer = setInterval(async () => {
+    try {
+      const result = await orderService.syncProviderCatalog();
+      logger.info(result, 'provider catalog synced');
+    } catch (error) {
+      logger.error({ error }, 'provider catalog sync failed');
+    }
+  }, env.CATALOG_SYNC_INTERVAL_MINUTES * 60 * 1000);
+
   const shutdown = async () => {
     logger.info('shutting down');
     clearInterval(maintenanceTimer);
+    clearInterval(catalogSyncTimer);
     if (embeddedWorker) await embeddedWorker.close();
     if (bot) bot.stop('SIGTERM');
     server.close();

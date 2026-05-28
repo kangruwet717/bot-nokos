@@ -3,13 +3,26 @@ const prisma = require('../config/prisma');
 function getPeriodRange(period) {
   const now = new Date();
   const start = new Date(now);
-  if (period === 'month') {
+  const normalizedPeriod = String(period || 'today').toLowerCase();
+  if (normalizedPeriod === 'month') {
     start.setDate(1);
     start.setHours(0, 0, 0, 0);
-  } else {
-    start.setHours(0, 0, 0, 0);
+    return { start, end: now, period: 'month' };
   }
-  return { start, end: now, period: period === 'month' ? 'month' : 'today' };
+  if (['week', 'weekly'].includes(normalizedPeriod)) {
+    const day = start.getDay();
+    const daysSinceMonday = day === 0 ? 6 : day - 1;
+    start.setDate(start.getDate() - daysSinceMonday);
+    start.setHours(0, 0, 0, 0);
+    return { start, end: now, period: 'week' };
+  }
+  if (['day', 'daily', 'today'].includes(normalizedPeriod)) {
+    start.setHours(0, 0, 0, 0);
+    return { start, end: now, period: 'today' };
+  }
+
+  start.setHours(0, 0, 0, 0);
+  return { start, end: now, period: 'today' };
 }
 
 async function buildReport(period = 'today') {
